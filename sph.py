@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.special import gamma
+from scipy.special import gamma as gam
+import astropy.constants as const
 
 """
 Create Your Own Smoothed-Particle-Hydrodynamics Simulation (With Python)
@@ -94,7 +95,7 @@ def getDensity( r, pos, m, h ):
 	return rho
 	
 	
-def getPressure(rho, k, n, eos="polytropic"):
+def getPressure_polytropic(rho, k, n):
 	"""
 	Equation of State
 	rho   vector of densities
@@ -102,15 +103,44 @@ def getPressure(rho, k, n, eos="polytropic"):
 	n     polytropic index
 	P     pressure
 	"""
-	if eos == "polytropic":
-		P = k * rho**(1+1/n)
-	elif eos == "ideal":
-		P = k * rho
+	P = k * rho**(1+1/n)
 	
 	return P
-	
 
-def getAcc( pos, vel, m, h, k, n, lmbda, nu ):
+
+def getPressure(rho, total_energy, gamma):
+	"""
+	Equation of State
+	rho   vector of densities
+	k     equation of state constant
+	n     polytropic index
+	P     pressure
+	"""
+	P = (gamma - 1) * rho * total_energy
+	
+	return P
+
+def getdu_dt(rho, P, m, vel, dW, N):
+	"""
+	Get the change in internal energy of the system
+
+	rho   vector of densities
+	K     equation of state constant
+	gamma polytropic index
+	du_dt  change in internal energy
+	"""
+	
+	vx = vel[:,0].reshape((N,1))
+	vy = vel[:,1].reshape((N,1))
+	vz = vel[:,2].reshape((N,1))
+
+
+	du_dt = P/rho**2 * np.sum(m * (dW[:,0]*(vx-vx.T) + dW[:,1]*(vy-vy.T) + dW[:,2]*(vz-vz.T)), 1).reshape((N,1))
+
+	return du_dt
+
+
+def getAcc( pos, vel, m, h, gamma, total_energy, lmbda, nu, dt ):
 	"""
 	Calculate the acceleration on each SPH particle
 	pos   is an N x 3 matrix of positions
@@ -125,16 +155,22 @@ def getAcc( pos, vel, m, h, k, n, lmbda, nu ):
 	"""
 	
 	N = pos.shape[0]
+
+	# Get pairwise distances and gradients
+	dx, dy, dz = getPairwiseSeparations( pos, pos )
+	dWx, dWy, dWz = gradW( dx, dy, dz, h )
+
+	dW = a = np.hstack((dWx, dWy, dWz))
 	
 	# Calculate densities at the position of the particles
 	rho = getDensity( pos, pos, m, h )
 	
 	# Get the pressures
-	P = getPressure(rho, k, n)
-	
-	# Get pairwise distances and gradients
-	dx, dy, dz = getPairwiseSeparations( pos, pos )
-	dWx, dWy, dWz = gradW( dx, dy, dz, h )
+	P = getPressure(rho, total_energy, gamma)
+
+	dudt = getdu_dt(rho, P, m, vel, dW, N)
+
+	total_energy += dudt * dt
 	
 	# Add Pressure contribution to accelerations
 	ax = - np.sum( m * ( P/rho**2 + P.T/rho.T**2  ) * dWx, 1).reshape((N,1))
@@ -145,12 +181,12 @@ def getAcc( pos, vel, m, h, k, n, lmbda, nu ):
 	a = np.hstack((ax,ay,az))
 	
 	# Add external potential force
-	#a -= lmbda * pos
+	a -= lmbda * pos
 	
 	# Add viscosity
-	#a -= nu * vel
+	a -= nu * vel
 	
-	return a
+	return a, total_energy
 	
 
 
@@ -168,21 +204,34 @@ def main():
 	k         = 0.1    # equation of state constant
 	n         = 1      # polytropic index
 	nu        = 1      # damping
+	gamma     = 5/3    # 
+	#initial_T = 1.0    # initial temperature
+	#mu = 1.2
+	initial_P = 1.0    # initial pressure
+	use_for_initial_e = "P"
 	plotRealTime = True # switch on for plotting as the simulation goes along
 	
 	# Generate Initial Conditions
 	np.random.seed(42)            # set the random number generator seed
 	
-	lmbda = 2*k*(1+n)*np.pi**(-3/(2*n)) * (M*gamma(5/2+n)/R**3/gamma(1+n))**(1/n) / R**2  # ~ 2.01
+	lmbda = 2*k*(1+n)*np.pi**(-3/(2*n)) * (M*gam(5/2+n)/R**3/gam(1+n))**(1/n) / R**2  # ~ 2.01
 	m     = M/N                    # single particle mass
-	pos   = 0.01 * np.random.randn(N,3)   # randomly selected positions and velocities
+	pos   = np.random.randn(N,3)   # randomly selected positions and velocities
 	vel   = np.zeros(pos.shape)
-	#vel -= 0.01
+
+	initial_rho = getDensity( pos, pos, m, h )
+
+	if use_for_initial_e == "P":
+		total_energy = initial_P / initial_rho / (gamma - 1)  # initial internal energy
+	#elif use_for_initial_e == "T":
+		#total_energy = const.k_B * initial_T / (gamma-1) / mu / const.m_p * np.ones((N,1)) # initial internal energy
+
+	#total_energy = np.full((N,1), 10.0) # initial internal energy
 	
 	# calculate initial gravitational accelerations
-	acc = getAcc( pos, vel, m, h, k, n, lmbda, nu )
+	acc, total_energy = getAcc( pos, vel, m, h, gamma, total_energy, lmbda, nu, dt )
 
-	#print(acc)
+	#print(acc.shape)
 	
 	# number of timesteps
 	Nt = int(np.ceil(tEnd/dt))
@@ -206,7 +255,7 @@ def main():
 		pos += vel * dt
 		
 		# update accelerations
-		acc = getAcc( pos, vel, m, h, k, n, lmbda, nu )
+		acc, total_energy = getAcc( pos, vel, m, h, gamma, total_energy, lmbda, nu, dt )
 		
 		# (1/2) kick
 		vel += acc * dt/2
@@ -223,7 +272,7 @@ def main():
 			plt.cla()
 			cval = np.minimum((rho-3)/3,1).flatten()
 			plt.scatter(pos[:,0],pos[:,1], c=cval, cmap=plt.cm.autumn, s=10, alpha=0.5)
-			ax1.set(xlim=(-1.4, 1.4), ylim=(-1.2, 1.2))
+			ax1.set(xlim=(-5, 5), ylim=(-5, 5))
 			ax1.set_aspect('equal', 'box')
 			ax1.set_xticks([-1,0,1])
 			ax1.set_yticks([-1,0,1])
