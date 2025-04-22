@@ -150,9 +150,7 @@ def getdu_dt(rho, P, m, vel, dW, N):
 
     vx = vel[:,0].reshape((N,1))
 
-    m_ij = (m*m.T) / 2
-
-    du_dt = 0.5 * np.sum(m_ij * ( P/rho**2 + P.T/rho.T**2) * (vx-vx.T) * dW, axis=1, keepdims=True).reshape((N,1))
+    du_dt = 0.5 * np.sum(m.T * ( P/rho**2 + P.T/rho.T**2) * (vx-vx.T) * dW, axis=1, keepdims=True).reshape((N,1))
 
     return du_dt
 
@@ -190,7 +188,7 @@ def getAcc( pos, vel, m, h, gamma, total_energy, lmbda, nu, dt, L):
     dudt = getdu_dt(rho, P, m, vel, dW, N)
 
     # Add Pressure contribution to accelerations
-    ax = - np.sum( m * ( P/rho**2 + P.T/rho.T**2  ) * dWx, 1).reshape((N,1))
+    ax = - np.sum( m.T * ( P/rho**2 + P.T/rho.T**2  ) * dWx, 1).reshape((N,1))
 
     # pack together the acceleration components
     a = ax
@@ -202,6 +200,12 @@ def getAcc( pos, vel, m, h, gamma, total_energy, lmbda, nu, dt, L):
     #a -= nu * vel
 
     return a, dudt, P
+
+def sine_bump(x, x_start, x_end):
+    bump = np.zeros_like(x)
+    mask = (x >= x_start) & (x <= x_end)
+    bump[mask] = np.sin(np.pi * (x[mask] - x_start) / (x_end - x_start)) 
+    return bump
 	
 
 
@@ -209,17 +213,17 @@ def main():
     """ SPH simulation """
 
     # Simulation parameters
-    N         = 400    # Number of particles
+    N         = 1000    # Number of particles
     t         = 0      # current time of the simulation
-    tEnd      = 5    # time at which simulation ends
+    tEnd      = 2    # time at which simulation ends
     #dt        = 0.04   # timestep
     M         = 1      # star mass
     R         = 0.75   # star radius
-    h         = 0.15    # smoothing length
+    h         = 0.1    # smoothing length
     cfl = 0.5
     k         = 0.1    # equation of state constant
     n         = 1      # polytropic index
-    nu        = 1      # damping
+    nu        = 0.05      # damping
     gamma     = 5/3    # 
     plotRealTime = True # switch on for plotting as the simulation goes along
 
@@ -232,25 +236,32 @@ def main():
     # For a sound wave set up
     L = 1.0
     x = np.linspace(0, L, N)
-    amplitude = 0.07
+    amplitude = 0.01
     rho0 = 1
     P0 = 1
     pos = x.reshape((N,1))   # randomly selected positions and velocities
     #print(pos.shape)
-    k = 2*np.pi / L
-    #initial_rho = rho0 * (1 + amplitude * np.sin(k * pos))
-    initial_rho = rho0 * np.ones((N,1))
+    k = 3 * 2*np.pi / (L)
+
+    #bump = sine_bump(pos, 0.0, 0.1)
+
+    initial_rho = rho0 * (1 + amplitude * np.sin(k * pos))
+    #initial_rho = rho0 * np.ones((N,1))
+    #initial_rho = rho0 * (1 + amplitude*bump)
     #print(initial_rho)
     
 
     cs = np.sqrt(gamma * P0 / rho0)
     dt = cfl * h / cs
     omega = k * cs
-    initial_P = P0 * np.ones((N,1))
+    #initial_P = P0 * np.ones((N,1))
     #initial_P = P0 * (1 + gamma * amplitude * np.sin(k * pos))
+    initial_P = P0 * (initial_rho / rho0)**gamma
 
-    vel   = np.zeros(pos.shape)
-    #vel = amplitude * cs * np.sin(k * pos)
+
+   #vel   = np.zeros(pos.shape)
+    vel = amplitude * cs * np.sin(k * pos)
+    #vel = amplitude * cs * bump
 
     x_true = np.linspace(0,1,100)
     true_density = rho0 * (1 + amplitude * np.sin(0 - k * x_true))
@@ -263,6 +274,7 @@ def main():
     # plt.show()
 
     m = initial_rho * L / N
+    #m = np.ones((N,1)) * L / N
 
     true_energy = 0.5 * amplitude**2 * omega**2 * 2 * np.pi / k * M / L
 
@@ -344,8 +356,8 @@ def main():
         vel_all[i+1, :] = vel.flatten()
         energy_all[i+1] = conserved_energy
         timesteps[i+1] = t
-        true_density = rho0 * (1 + amplitude * np.sin(omega * t - k * x_true))
-        true_velocity = cs * amplitude * np.sin(omega * t - k * x_true)
+        true_density = rho0 * (1 + amplitude * np.sin( - omega * t + k * x_true))
+        true_velocity = cs * amplitude * np.sin( - omega * t + k * x_true)
         true_P = P0 * (true_density / rho0)**gamma
         
         # plot in real time
@@ -354,10 +366,10 @@ def main():
             plt.cla()
             #cval = np.minimum((rho-3)/3,1).flatten()
             plt.scatter(pos[:,0],rho[:,0], c='k', cmap=plt.cm.autumn, s=10, alpha=0.5)
-            #plt.plot(x_true, true_density, color='blue')
+            plt.plot(x_true, true_density, color='blue')
             plt.xlabel('x')
             plt.ylabel('density')
-            ax1.set(xlim=(0, 1), ylim=(0.99, 1.01))
+            ax1.set(xlim=(0, 1), ylim=(0.9, 1.1))
             # ax1.set_aspect('equal', 'box')
             # ax1.set_xticks([-1,0,1])
             #ax1.set_facecolor((.1,.1,.1))
@@ -366,10 +378,10 @@ def main():
             plt.cla()
             #cval = np.minimum((rho-3)/3,1).flatten()
             plt.scatter(pos[:,0],P[:,0], c='k', cmap=plt.cm.autumn, s=10, alpha=0.5)
-            #plt.plot(x_true, true_P, color='blue')
+            plt.plot(x_true, true_P, color='blue')
             plt.xlabel('x')
             plt.ylabel('Pressure')
-            ax2.set(xlim=(0, 1), ylim=(0.99, 1.01))
+            ax2.set(xlim=(0, 1), ylim=(0.85, 1.2))
             # ax1.set_aspect('equal', 'box')
             # ax1.set_xticks([-1,0,1])
             #ax2.set_facecolor((.1,.1,.1))
@@ -378,10 +390,10 @@ def main():
             plt.cla()
             #cval = np.minimum((rho-3)/3,1).flatten()
             plt.scatter(pos[:,0],vel[:,0], c='k', cmap=plt.cm.autumn, s=10, alpha=0.5)
-            #plt.plot(x_true, true_velocity, color='blue')
+            plt.plot(x_true, true_velocity, color='blue')
             plt.xlabel('x')
             plt.ylabel('Velocity')
-            ax3.set(xlim=(0, 1), ylim = (-0.01, 0.01))
+            ax3.set(xlim=(0, 1), ylim=(-0.2, 0.2))
             # ax1.set_aspect('equal', 'box')
             # ax1.set_xticks([-1,0,1])
             #ax3.set_facecolor((.1,.1,.1))
@@ -398,23 +410,23 @@ def main():
             # ax1.set_xticks([-1,0,1])
             #ax4.set_facecolor((.1,.1,.1))
             
-            #fig.savefig("frame_%04d.png" % i)
+            fig.savefig("frame_%04d.png" % i)
             plt.pause(0.001)
         
-    # add labels/legend
-    # frames = []
-    # for i in range(Nt):
-    #     filename = f"frame_%04d.png" % i
-    #     image = imageio.imread(filename)
-    #     frames.append(image)
-    # imageio.mimsave("animation_all_paper_zer.gif", frames, loop=0)
+    #add labels/legend
+    frames = []
+    for i in range(Nt):
+        filename = f"frame_%04d.png" % i
+        image = imageio.imread(filename)
+        frames.append(image)
+    imageio.mimsave("animation_all_paper_3_sound_wave.gif", frames, loop=0)
 
-    # # Clean up individual frame files (optional)
-    # for i in range(Nt):
-    #     os.remove(f"frame_%04d.png" % i)	
+    # Clean up individual frame files (optional)
+    for i in range(Nt):
+        os.remove(f"frame_%04d.png" % i)	
         
-    # Save figure
-    #plt.savefig('sph_1d_paper_zer.png',dpi=240)
+    #Save figure
+    plt.savefig('sph_1d_paper_3_sound_wave.png',dpi=240)
     plt.show()
         
     return 0
