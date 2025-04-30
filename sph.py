@@ -181,10 +181,10 @@ def getAcc( pos, vel, m, h, gamma, total_energy, lmbda, nu, dt ):
 	a = np.hstack((ax,ay,az))
 	
 	# Add external potential force
-	a -= lmbda * pos
+	#a -= lmbda * pos
 	
 	# Add viscosity
-	a -= nu * vel
+	#a -= nu * vel
 	
 	return a, total_energy
 	
@@ -207,7 +207,7 @@ def main():
 	gamma     = 5/3    # 
 	#initial_T = 1.0    # initial temperature
 	#mu = 1.2
-	initial_P = 1.0    # initial pressure
+	initial_P = 0.0    # initial pressure
 	use_for_initial_e = "P"
 	plotRealTime = True # switch on for plotting as the simulation goes along
 	
@@ -218,6 +218,7 @@ def main():
 	m     = M/N                    # single particle mass
 	pos   = np.random.randn(N,3)   # randomly selected positions and velocities
 	vel   = np.zeros(pos.shape)
+	#vel -= 0.5
 
 	initial_rho = getDensity( pos, pos, m, h )
 

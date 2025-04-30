@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.special import gamma as gam
 import astropy.constants as const
+from scipy.integrate import cumulative_trapezoid
+from scipy.interpolate import interp1d
 
 import imageio
 import os
@@ -13,6 +15,68 @@ Oriinally written by Philip Mocz (2020) Princeton Univeristy, @PMocz
 Modified by Matt Lastovka & Sophie Robbins.
 
 """
+
+def initialize_particles_from_density(N, L, rho0, A, k):
+    """
+    Return non-uniform particle positions x such that uniform-mass particles reproduce
+    the desired sinusoidal density perturbation.
+    
+    Parameters:
+        N: int - number of particles
+        L: float - domain length
+        rho0: float - background density
+        A: float - amplitude of perturbation
+        k: float - wavenumber (2π / λ)
+        
+    Returns:
+        x: (N,1) ndarray of particle positions in [0, L)
+    """
+    x_samples = np.linspace(0, L, 10000)
+    rho_samples = rho0 * (1 + A * np.sin(k * x_samples))
+    
+    M_samples = cumulative_trapezoid(rho_samples, x_samples, initial=0)
+    M_samples /= M_samples[-1]  # normalize to [0,1]
+    
+    # Create interpolation to invert M(x)
+    M_to_x = interp1d(M_samples, x_samples)
+    
+    # Create uniform mass bins
+    m_vals = np.linspace(0, 1, N, endpoint=False) + 0.5/N
+    x = M_to_x(m_vals)
+    
+    return x.reshape((N,1))
+
+def check_neighbor_count(pos, h, L, kernel_func, threshold=20, verbose=True):
+    """
+    Estimate the average number of neighbors per particle in SPH.
+
+    Parameters:
+        pos         : (N,1) array of particle positions
+        h           : smoothing length
+        L           : domain length (assumes 1D periodic)
+        kernel_func : kernel function (e.g. W_cubic)
+        threshold   : minimum safe neighbor count (default: 20)
+        verbose     : whether to print warning/info
+
+    Returns:
+        avg_neighbors : float
+    """
+    N = pos.shape[0]
+    dx = getPairwiseSeparations(pos, pos)
+    dx = dx - L * np.round(dx / L)  # periodic wrap
+
+    W_vals = kernel_func(dx, h)
+    
+    neighbor_counts = np.sum(W_vals > 0, axis=1)  # count non-zero weights
+    avg_neighbors = np.mean(neighbor_counts)
+
+    if verbose:
+        if avg_neighbors < threshold:
+            print(f"Warning: Average neighbors per particle = {avg_neighbors:.1f} < {threshold}. SPH may become unstable.")
+        else:
+            print(f"Average neighbors per particle = {avg_neighbors:.1f} (safe).")
+
+    return avg_neighbors
 
 def W( x, h ):
     """
@@ -115,6 +179,7 @@ def getDensity( r, pos, m, h, L ):
 	
 	
 def getPressure_polytropic(rho, k, n):
+
     """
     Equation of State
     rho   vector of densities
@@ -208,15 +273,14 @@ def main():
     """ SPH simulation """
 
     # Simulation parameters
-    N         = 1000    # Number of particles
+    N         = 501   # Number of particles
     t         = 0      # current time of the simulation
-    tEnd      = 2    # time at which simulation ends
+    #tEnd      = 2    # time at which simulation ends
     #dt        = 0.04   # timestep
     M         = 1      # total mass of the system
-    h         = 0.1    # smoothing length
     cfl       = 0.1
     k         = 0.1    # equation of state constant
-    nu        = 0.05      # damping
+    nu        = 0.1      # damping
     gamma     = 5/3    # adiabtic index
     plotRealTime = True # switch on for plotting as the simulation goes along
 
@@ -225,16 +289,19 @@ def main():
 
     # For a sound wave set up
     L = 1.0  # size of the box
-    x = np.concatenate([np.linspace(0, L, N-N//50), np.linspace(0.4, 0.6, N//50)])  # initiql particle positions
-    x = np.linspace(0, L, N)  # initiql particle positions
+    h = 1.0*L/N    # smoothing length
     amplitude = 0.01   # amplitude of the sound wave
     rho0 = 1  # initial background density
+    k = 2*np.pi / (L)  # wave number
+    #x = np.concatenate([np.linspace(0, L, N-N//50), np.linspace(0.4, 0.6, N//50)])  # initiql particle positions
+    #x = np.linspace(0, L, N, endpoint=False)  # initiql particle positions
+    x = initialize_particles_from_density(N, L, rho0, amplitude, k)
     P0 = 1  # initial background pressure
-    pos = x.reshape((N,1))   # adjust shape of the particle positions array
-    k = 3 * 2*np.pi / (L)  # wave number
+    pos = x   # adjust shape of the particle positions array
     cs = np.sqrt(gamma * P0 / rho0) # sound speed
     dt = cfl * h / cs # calculate timestep from the cfl condition
     omega = k * cs # angular frequency of the sound wave
+    tEnd = 2*np.pi / omega # time at which the simulation ends
 
     # Define the initial density distribution of the particles
     initial_rho = rho0 * (1 + amplitude * np.sin(k * pos))
@@ -249,22 +316,32 @@ def main():
 
     # Define the initial velocity distribution of the particles
     #vel   = cs * np.ones(pos.shape)
-    vel   = np.zeros(pos.shape)
-    #vel = amplitude * cs * np.sin(k * pos)
+    #vel   = np.zeros(pos.shape)
+    vel = amplitude * cs * np.sin(k * pos)
 
     x_true = np.linspace(0,1,100)
-    true_density = rho0 * (1 + amplitude * np.sin(0 - k * x_true))
+    true_density = rho0 * (1 + amplitude * np.sin(k * x_true))
+
+    # Calculate the initial masses of every particle
+    #m = initial_rho * L / N
+    m = np.ones((N,1)) * rho0 * L / N
+
+
+    # rho_sph = getDensity(pos, pos, m, h, L)
+    # rho_offset = rho_sph - np.mean(rho_sph)
+    # rho_true_offset = initial_rho - np.mean(initial_rho)
+    # plt.plot(pos, rho_offset, 'o', label="SPH offset")
+    # plt.plot(pos, rho_true_offset, '-', label="Analytic offset")
+    # plt.legend()
+    # plt.title("Density Oscillation (Offset Removed)")
+    # plt.show()
 
     # plt.figure()
-    # plt.plot(pos, initial_rho, 'o')
-    # plt.plot(x_true, true_density, '--')
+    # #plt.plot(pos, initial_rho, '-')
+    # plt.plot(pos, rho_sph, '--')
     # plt.xlabel('x')
     # plt.ylabel('Density')
     # plt.show()
-
-    # Calculate the initial masses of every particle
-    m = initial_rho * L / N
-    #m = np.ones((N,1)) * L / N
 
     total_energy = initial_P / initial_rho / (gamma - 1)  # initial internal energy
 
@@ -353,7 +430,7 @@ def main():
         true_P = P0 * (true_density / rho0)**gamma
         
         # plot in real time
-        if plotRealTime or (i == Nt-1):
+        if plotRealTime and i % 100 == 0:
             # plot the density
             plt.sca(ax1)
             plt.cla()
@@ -362,7 +439,9 @@ def main():
             plt.plot(x_true, true_density, color='blue')
             plt.xlabel('x')
             plt.ylabel('density')
-            #ax1.set(xlim=(0, 1), ylim=(0.9, 1.1))
+            ax1.set(xlim=(0, 1), 
+                    #ylim=(0.9, 1.1)
+                    )
             # ax1.set_aspect('equal', 'box')
             # ax1.set_xticks([-1,0,1])
             #ax1.set_facecolor((.1,.1,.1))
@@ -372,10 +451,12 @@ def main():
             plt.cla()
             #cval = np.minimum((rho-3)/3,1).flatten()
             plt.scatter(pos[:,0],P[:,0], c='k', cmap=plt.cm.autumn, s=10, alpha=0.5)
-            #plt.plot(x_true, true_P, color='blue')
+            plt.plot(x_true, true_P, color='blue')
             plt.xlabel('x')
             plt.ylabel('Pressure')
-            #ax2.set(xlim=(0, 1), ylim=(0.85, 1.2))
+            ax2.set(xlim=(0, 1), 
+                    #ylim=(0.85, 1.2)
+                    )
             # ax1.set_aspect('equal', 'box')
             # ax1.set_xticks([-1,0,1])
             #ax2.set_facecolor((.1,.1,.1))
@@ -385,10 +466,12 @@ def main():
             plt.cla()
             #cval = np.minimum((rho-3)/3,1).flatten()
             plt.scatter(pos[:,0],vel[:,0], c='k', cmap=plt.cm.autumn, s=10, alpha=0.5)
-            #plt.plot(x_true, true_velocity, color='blue')
+            plt.plot(x_true, true_velocity, color='blue')
             plt.xlabel('x')
             plt.ylabel('Velocity')
-            #ax3.set(xlim=(0, 1), ylim=(-0.2, 0.2))
+            ax3.set(xlim=(0, 1), 
+                    #ylim=(-0.2, 0.2)
+                    )
             # ax1.set_aspect('equal', 'box')
             # ax1.set_xticks([-1,0,1])
             #ax3.set_facecolor((.1,.1,.1))
