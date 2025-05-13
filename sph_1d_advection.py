@@ -249,8 +249,8 @@ def getAcc( pos, vel, m, h, gamma, total_energy, nu, dt, L, initial_P = None):
     rho = getDensity( pos, pos, m, h, L )
 
     # Get the pressures
-    P = getPressure(rho, total_energy, gamma)
-    #P = initial_P
+    #P = getPressure(rho, total_energy, gamma)
+    P = initial_P
 
     dudt = getdu_dt(rho, P, m, vel, dW, N)
 
@@ -289,68 +289,45 @@ def main():
 
     # For a sound wave set up
     L = 1.0  # size of the box
-    h = 1.02*L/N    # smoothing length
-    amplitude = 0.01   # amplitude of the sound wave
-    rho0 = 1  # initial background density
+    h = 1.05*L/N    # smoothing length
+    amplitude = 0.4   # amplitude of the sound wave
+    rho0 = 0.6  # initial background density
     k = 2*np.pi / (L)  # wave number
     #x = np.concatenate([np.linspace(0, L, N-N//50), np.linspace(0.4, 0.6, N//50)])  # initiql particle positions
-    #x = np.linspace(0, L, N, endpoint=False)  # initiql particle positions
-    x = initialize_particles_from_density(N, L, rho0, amplitude, k)
+    x = np.linspace(0, L, N, endpoint=False)  # initiql particle positions
+    #x = initialize_particles_from_density(N, L, rho0, amplitude, k)
     P0 = 1  # initial background pressure
-    pos = x   # adjust shape of the particle positions array
+    pos = x.reshape((N,1))   # adjust shape of the particle positions array
     cs = np.sqrt(gamma * P0 / rho0) # sound speed
     dt = cfl * h / cs # calculate timestep from the cfl condition
     omega = k * cs # angular frequency of the sound wave
     tEnd = 2*np.pi / omega # time at which the simulation ends
 
     # Define the initial density distribution of the particles
-    initial_rho = rho0 * (1 + amplitude * np.sin(k * pos))
+    initial_rho = rho0 + amplitude * np.sin(k * pos)
     #initial_rho = rho0 * np.ones((N,1)) 
-    #m = np.ones((N,1)) * L / N
+    #m = np.ones((N,1)) * rho0 * L / N
     #initial_rho = getDensity( pos, pos, m, h, L )
 
     # Define the initial pressure distribution of the particles
-    #initial_P = P0 * np.ones((N,1))
+    initial_P = P0 * np.ones((N,1))
     #initial_P = P0 * (1 + gamma * amplitude * np.sin(k * pos))
-    initial_P = P0 * (initial_rho / rho0)**gamma
+    #initial_P = P0 * (initial_rho / rho0)**gamma
 
     # Define the initial velocity distribution of the particles
-    #vel   = cs * np.ones(pos.shape)
+    vel   = cs * np.ones(pos.shape)
     #vel   = np.zeros(pos.shape)
-    vel = amplitude * cs * np.sin(k * pos)
+    #vel = amplitude * cs * np.sin(k * pos)
 
     x_true = np.linspace(0,1,100)
-    true_density = rho0 * (1 + amplitude * np.sin(k * x_true))
+    #true_density = rho0 * (1 + amplitude * np.sin(k * x_true))
 
     # Calculate the initial masses of every particle
-    #m = initial_rho * L / N
-    m = np.ones((N,1)) * rho0 * L / N
-
-
-    # rho_sph = getDensity(pos, pos, m, h, L)
-    # rho_offset = rho_sph - np.mean(rho_sph)
-    # rho_true_offset = initial_rho - np.mean(initial_rho)
-    # plt.plot(pos, rho_offset, 'o', label="SPH offset")
-    # plt.plot(pos, rho_true_offset, '-', label="Analytic offset")
-    # plt.legend()
-    # plt.title("Density Oscillation (Offset Removed)")
-    # plt.show()
-
-    # plt.figure()
-    # #plt.plot(pos, initial_rho, '-')
-    # plt.plot(pos, rho_sph, '--')
-    # plt.xlabel('x')
-    # plt.ylabel('Density')
-    # plt.show()
+    m = initial_rho * L / N
+    #m = np.ones((N,1)) * rho0 * L / N
 
     total_energy = initial_P / initial_rho / (gamma - 1)  # initial internal energy
 
-    # plt.plot(pos[:,0], initial_rho, 'o', label="initial")
-    # plt.plot(pos[:,0], getDensity( pos, pos, m, h, L ), 'o', label="initial sph")
-    # plt.xlabel('x')
-    # plt.ylabel('Density')
-    # plt.legend( )
-    # plt.show()
     # calculate initial gravitational accelerations
     acc, dudt, P = getAcc( pos, vel, m, h, gamma, total_energy, nu, dt, L, initial_P=initial_P)
 
@@ -386,9 +363,6 @@ def main():
     ax2 = plt.subplot(grid[1,0])
     ax3 = plt.subplot(grid[0,1])
     ax4 = plt.subplot(grid[1,1])
-    # rr = np.zeros((100,3))
-    # rlin = np.linspace(0,1,100)
-    # rr[:,0] =rlin
 
     # Simulation Main Loop
     for i in range(Nt):
@@ -425,9 +399,9 @@ def main():
         vel_all[i+1, :] = vel.flatten()
         energy_all[i+1] = conserved_energy
         timesteps[i+1] = t
-        true_density = rho0 * (1 + amplitude * np.sin( - omega * t + k * x_true))
-        true_velocity = cs * amplitude * np.sin( - omega * t + k * x_true)
-        true_P = P0 * (true_density / rho0)**gamma
+        true_density = rho0 + amplitude * np.sin( - omega * t + k * x_true)
+        true_velocity = cs * np.ones_like(x_true)
+        true_P = P0 * np.ones_like(x_true)
         
         # plot in real time
         if plotRealTime and i % 100 == 0:
@@ -436,7 +410,7 @@ def main():
             plt.cla()
             #cval = np.minimum((rho-3)/3,1).flatten()
             plt.scatter(pos[:,0],rho[:,0], c='k', cmap=plt.cm.autumn, s=10, alpha=0.5)
-            plt.plot(x_true, true_density, color='blue')
+            plt.plot(x_true, true_density, '--', color='blue')
             plt.xlabel('x')
             plt.ylabel('density')
             ax1.set(xlim=(0, 1), 
@@ -451,7 +425,7 @@ def main():
             plt.cla()
             #cval = np.minimum((rho-3)/3,1).flatten()
             plt.scatter(pos[:,0],P[:,0], c='k', cmap=plt.cm.autumn, s=10, alpha=0.5)
-            plt.plot(x_true, true_P, color='blue')
+            plt.plot(x_true, true_P, '--', color='blue')
             plt.xlabel('x')
             plt.ylabel('Pressure')
             ax2.set(xlim=(0, 1), 
@@ -466,7 +440,7 @@ def main():
             plt.cla()
             #cval = np.minimum((rho-3)/3,1).flatten()
             plt.scatter(pos[:,0],vel[:,0], c='k', cmap=plt.cm.autumn, s=10, alpha=0.5)
-            plt.plot(x_true, true_velocity, color='blue')
+            plt.plot(x_true, true_velocity, '--', color='blue')
             plt.xlabel('x')
             plt.ylabel('Velocity')
             ax3.set(xlim=(0, 1), 
@@ -489,24 +463,26 @@ def main():
             # ax1.set_xticks([-1,0,1])
             #ax4.set_facecolor((.1,.1,.1))
             
-            #fig.savefig("frame_%04d.png" % i)
+            fig.savefig("frame_%04d.png" % i)
             plt.pause(0.001)
         
     # Code for making the animation (to use also un-comment the "fig.savefig" line above)
-    # frames = []
-    # for i in range(Nt):
-    #     filename = f"frame_%04d.png" % i
-    #     if os.path.exists(filename):
-    #         image = imageio.imread(filename)
-    #         frames.append(image)
-    # imageio.mimsave("animation_all_paper_3_sound_wave.gif", frames, loop=0)
+    frames = []
+    for i in range(Nt):
+        filename = f"frame_%04d.png" % i
+        if os.path.exists(filename):
+            image = imageio.imread(filename)
+            frames.append(image)
+    imageio.mimsave("animation_advection.gif", frames, loop=0)
 
-    # # Clean up individual frame files (optional)
-    # for i in range(Nt):
-    #     os.remove(f"frame_%04d.png" % i)	
+    # Clean up individual frame files (optional)
+    for i in range(Nt):
+        filename = f"frame_%04d.png" % i
+        if os.path.exists(filename):
+            os.remove(filename)	
         
     # Save figure
-    plt.savefig('sph_1d_paper_3_sound_wave.png',dpi=240)
+    plt.savefig('sph_1d_advection.png',dpi=240)
     plt.show()
         
     return 0
