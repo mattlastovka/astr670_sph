@@ -6,3 +6,5 @@ Files in Directory:
 - sph.py: Intial 3d version of SPH
 - sph_1d_advection.py: 1d version of SPH set up to run 1d advection of a sine wave
 - sph_1d_soundwave.py: 1d version of SPH set up to run the sound wave setup
+- animation_advection.gif: animation of the 1d advection setup
+- animation_soundwave.gif: animation of the 1d sound wave setup
